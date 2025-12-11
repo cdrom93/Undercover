@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -24,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -225,21 +227,59 @@ fun NumberSelector(label: String, value: Int, onValueChange: (Int) -> Unit, minV
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
         Text(text = label, style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue) { Icon(Icons.Default.Remove, "Remove") }
+            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue) { Icon(Icons.Filled.Remove, "Remove") }
             Text(text = "$value", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
-            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue) { Icon(Icons.Default.Add, "Add") }
+            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue) { Icon(Icons.Filled.Add, "Add") }
         }
     }
 }
+
+@Composable
+fun RulesDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Règles du jeu") },
+        text = {
+            LazyColumn {
+                item {
+                    Text("But du jeu", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Démasquer les joueurs qui n'ont pas le même mot que vous !")
+                    Spacer(Modifier.height(16.dp))
+                    Text("Les Rôles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("\t• Civils: Ils sont majoritaires et ont tous le même mot. Leur but est de trouver et d'éliminer tous les Infiltrés et M. White.")
+                    Text("\t• Infiltrés: Ils sont une minorité et ont un mot légèrement différent. Leur but est de se faire passer pour un Civil et de ne pas être éliminés.")
+                    Text("\t• M. White: Il est seul et n'a aucun mot. Son but est de deviner le mot des Civils en écoutant les autres joueurs.")
+                    Spacer(Modifier.height(16.dp))
+                    Text("Déroulement", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("1. Chacun découvre son mot (ou son rôle pour M. White).")
+                    Text("2. À tour de rôle, chaque joueur donne un mot pour décrire le sien.")
+                    Text("3. Après la discussion, le groupe vote pour éliminer un joueur.")
+                    Spacer(Modifier.height(16.dp))
+                    Text("Conditions de Victoire", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("\t• Les Civils gagnent s'ils éliminent tous les Infiltrés et M. White.")
+                    Text("\t• Les Infiltrés et M. White gagnent s'il ne reste qu'un seul Civil en jeu.")
+                    Text("\t• M. White gagne seul s'il est éliminé mais devine le mot des Civils.")
+
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } }
+    )
+}
+
 
 @Composable
 fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhiteCount: Int) -> Unit) {
     var playerCount by remember { mutableIntStateOf(5) }
     var undercoverCount by remember { mutableIntStateOf(1) }
     var mrWhiteCount by remember { mutableIntStateOf(0) }
+    var showRules by remember { mutableStateOf(false) }
+
+    if (showRules) {
+        RulesDialog { showRules = false }
+    }
 
     val maxBadRoles = playerCount / 2
-
     if (undercoverCount + mrWhiteCount > maxBadRoles) {
         undercoverCount = 1.coerceAtMost(maxBadRoles)
         mrWhiteCount = 0
@@ -251,7 +291,9 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("Undercover", style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
         Text("Configurez votre partie", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { showRules = true }) { Text("Règles du jeu") }
+        Spacer(Modifier.height(8.dp))
 
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -364,13 +406,25 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
 @Composable
 fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
     val activePlayers = players.filter { !it.isEliminated }
+    var playerToConfirm by remember { mutableStateOf<Player?>(null) }
+
+    playerToConfirm?.let { player ->
+        AlertDialog(
+            onDismissRequest = { playerToConfirm = null },
+            title = { Text("Confirmer l'élimination") },
+            text = { Text("Êtes-vous sûr de vouloir éliminer ${player.name} ?") },
+            confirmButton = { Button(onClick = { onPlayerVoted(player); playerToConfirm = null }) { Text("Confirmer") } },
+            dismissButton = { TextButton(onClick = { playerToConfirm = null }) { Text("Annuler") } }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Qui est le plus suspect ?", style = MaterialTheme.typography.headlineMedium)
         Text("Votez pour éliminer un joueur.", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(activePlayers) { player ->
-                Button(onClick = { onPlayerVoted(player) }, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { playerToConfirm = player }, modifier = Modifier.fillMaxWidth()) {
                     Text(player.name, style = MaterialTheme.typography.titleMedium)
                 }
             }
@@ -411,7 +465,6 @@ fun MrWhiteFailedScreen(onContinue: () -> Unit) {
         Button(onClick = onContinue) { Text("Continuer") }
     }
 }
-
 
 @Composable
 fun RoundOverScreen(winner: Winner, onShowScores: () -> Unit) {
