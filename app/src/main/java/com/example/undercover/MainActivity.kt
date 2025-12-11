@@ -549,7 +549,15 @@ fun AvengerRevengeScreen(players: List<Player>, avenger: Player, onPlayerChosen:
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(potentialVictims) { victim ->
                 Button(onClick = { onPlayerChosen(victim) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(victim.name, style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(victim.name, style = MaterialTheme.typography.titleMedium)
+                        if (victim.power == Power.BOOMERANG && victim.isPowerUsed) {
+                            Text(" 🪃", style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (victim.power == Power.DEESSE_JUSTICE && !victim.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
                 }
             }
         }
