@@ -413,7 +413,7 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
         } else {
             ElevatedCard(modifier = Modifier.padding(16.dp)) {
                 Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (currentPlayer.power != null && currentPlayer.power != Power.DEESSE_JUSTICE) {
+                    if (currentPlayer.power != null) {
                         Text("${currentPlayer.power.emoji} ${currentPlayer.power.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
                         Text(currentPlayer.power.description, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
@@ -439,13 +439,9 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
 
 @Composable
 fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
-    val deesse = state.roundPlayers.find { it.power == Power.DEESSE_JUSTICE && !it.isEliminated }
     val eliminatedPlayers = state.roundPlayers.filter { it.isEliminated }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Tour de parole", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
-        if (deesse != null) {
-            Text("${deesse.power!!.emoji} La Déesse de la Justice est ${deesse.name}.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        }
         Text("Chaque joueur doit donner un mot pour décrire son mot secret. L'ordre de parole est le suivant :", textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         ElevatedCard(modifier = Modifier.weight(1f).fillMaxWidth()){
@@ -455,6 +451,9 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
                         Text(player.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 8.dp))
                         if (player.power == Power.BOOMERANG && player.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleLarge)
+                        }
+                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 }
@@ -498,7 +497,15 @@ fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(activePlayers) { player ->
                 Button(onClick = { playerToConfirm = player }, modifier = Modifier.fillMaxWidth()) {
-                    Text(player.name, style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(player.name, style = MaterialTheme.typography.titleMedium)
+                        if (player.power == Power.BOOMERANG && player.isPowerUsed) {
+                            Text(" 🪃", style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
                 }
             }
         }
@@ -557,8 +564,7 @@ fun BoomerangEffectScreen(boomerangPlayer: Player, onContinue: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Text("BOOMERANG !", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-        Text("${boomerangPlayer.name} utilise son pouvoir !", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        Text("L'élimination est annulée pour cette fois. Une icône 🪃 apparaît à côté de son nom.", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+        Text("${boomerangPlayer.name} utilise son pouvoir ! L'élimination est annulée pour cette fois.", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Spacer(Modifier.height(32.dp))
         Button(onClick = onContinue) { Text("Continuer") }
     }

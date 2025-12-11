@@ -24,7 +24,7 @@ enum class Power(val displayName: String, val description: String, val emoji: St
     BOOMERANG("Le Boomerang", "La première fois que le Boomerang reçoit la majorité des votes, au lieu d'être éliminé, les votes contre lui rebondissent sur ceux qui les ont exprimés !", "🪃"),
     DEESSE_JUSTICE("Déesse de la Justice", "En cas d'égalité des votes, elle décide qui est éliminé (même si elle a déjà été éliminée).", "⚖️"),
     FANTOME("Le Fantôme", "Peut encore voter même après avoir été éliminé !", "👻"),
-    VENGEUSE("La Vengeuse", "Quand la Vengeuse est éliminée, elle peut éliminer quelqu'un avec elle (nécessite 5 joueurs ou plus).", "🦸‍♀️")
+    VENGEUSE("La Vengeuse", "Quand la Vengeuse est éliminée, elle peut éliminer quelqu'un avec elle.", "🦸‍♀️")
 }
 
 enum class Winner {
