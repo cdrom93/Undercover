@@ -3,6 +3,7 @@ package com.example.undercover
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,14 +53,16 @@ sealed class GameState {
     data class Reveal(val roundPlayers: List<Player>, val currentPlayerIndex: Int = 0, val isCardRevealed: Boolean = false) : GameState()
     data class Speaking(val roundPlayers: List<Player>, val speakingOrder: List<Player>) : GameState()
     data class Voting(val roundPlayers: List<Player>) : GameState()
-    data class PlayerEliminated(val players: List<Player>, val eliminatedPlayer: Player) : GameState()
+    data class PlayerEliminated(val players: List<Player>, val eliminatedPlayer: Player, val isFirstElimination: Boolean) : GameState()
+    data class AvengerRevenge(val players: List<Player>, val avenger: Player) : GameState()
+    data class BoomerangEffect(val players: List<Player>, val boomerangPlayer: Player) : GameState()
     data class MrWhiteGuess(val players: List<Player>, val mrWhite: Player) : GameState()
     data class MrWhiteFailed(val players: List<Player>) : GameState()
-    data class RoundOver(val winner: Winner, val originalPlayers: List<Player>) : GameState()
+    data class RoundOver(val winner: Winner, val originalPlayers: List<Player>, val firstEliminatedPlayer: Player?) : GameState()
     data class Scoreboard(val scores: Map<String, Int>) : GameState()
 }
 
-data class GameSettings(val playerCount: Int, val undercoverCount: Int, val mrWhiteCount: Int)
+data class GameSettings(val playerCount: Int, val undercoverCount: Int, val mrWhiteCount: Int, val selectedPowers: Set<Power>)
 
 // --- Main App Composable (Router) ---
 
@@ -84,8 +88,8 @@ fun UndercoverApp() {
 
     when (val state = gameState) {
         is GameState.Setup -> {
-            GameSetupScreen(onStartGame = { pCount, uCount, mWCount ->
-                val settings = GameSettings(pCount, uCount, mWCount)
+            GameSetupScreen(onStartGame = { pCount, uCount, mWCount, sPowers ->
+                val settings = GameSettings(pCount, uCount, mWCount, sPowers)
                 gameSettings = settings
                 gameState = GameState.NameEntry(settings)
             })
@@ -95,7 +99,7 @@ fun UndercoverApp() {
                 playerCount = state.settings.playerCount,
                 onNamesConfirmed = { playerNames ->
                     gameSettings?.let {
-                        val players = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount)
+                        val players = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers)
                         playerScores = playerNames.associate { name -> name to 0 }
                         gameState = GameState.Reveal(players)
                     }
@@ -126,11 +130,19 @@ fun UndercoverApp() {
             VotingScreen(
                 players = state.roundPlayers,
                 onPlayerVoted = { votedPlayer ->
-                    val updatedPlayers = state.roundPlayers.map {
-                        if (it.name == votedPlayer.name) it.copy(isEliminated = true) else it
+                    if (votedPlayer.power == Power.BOOMERANG && !votedPlayer.isPowerUsed) {
+                        val updatedPlayers = state.roundPlayers.map {
+                            if (it.name == votedPlayer.name) it.copy(isPowerUsed = true) else it
+                        }
+                        gameState = GameState.BoomerangEffect(updatedPlayers, votedPlayer)
+                    } else {
+                        val isFirstElimination = state.roundPlayers.none { it.isEliminated }
+                        val updatedPlayers = state.roundPlayers.map {
+                            if (it.name == votedPlayer.name) it.copy(isEliminated = true) else it
+                        }
+                        val newlyEliminatedPlayer = updatedPlayers.first { it.name == votedPlayer.name }
+                        gameState = GameState.PlayerEliminated(updatedPlayers, newlyEliminatedPlayer, isFirstElimination)
                     }
-                    val newlyEliminatedPlayer = updatedPlayers.first { it.name == votedPlayer.name }
-                    gameState = GameState.PlayerEliminated(updatedPlayers, newlyEliminatedPlayer)
                 }
             )
         }
@@ -138,12 +150,15 @@ fun UndercoverApp() {
             PlayerEliminatedScreen(
                 eliminatedPlayer = state.eliminatedPlayer,
                 onContinue = {
-                    if (state.eliminatedPlayer.role == Role.MR_WHITE) {
+                    if (state.eliminatedPlayer.power == Power.VENGEUSE && state.players.size >= 5) {
+                        gameState = GameState.AvengerRevenge(state.players, state.eliminatedPlayer)
+                    } else if (state.eliminatedPlayer.role == Role.MR_WHITE) {
                         gameState = GameState.MrWhiteGuess(state.players, state.eliminatedPlayer)
                     } else {
                         val winner = Game.checkWinner(state.players)
                         if (winner != Winner.NONE) {
-                            gameState = GameState.RoundOver(winner, state.players)
+                            val firstEliminated = if (state.isFirstElimination) state.eliminatedPlayer else null
+                            gameState = GameState.RoundOver(winner, state.players, firstEliminated)
                         } else {
                             val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
                             gameState = GameState.Speaking(state.players, speakingOrder)
@@ -152,16 +167,32 @@ fun UndercoverApp() {
                 }
             )
         }
+        is GameState.AvengerRevenge -> {
+            AvengerRevengeScreen(
+                players = state.players,
+                avenger = state.avenger,
+                onPlayerChosen = { chosenPlayer ->
+                    val updatedPlayers = state.players.map {
+                        if (it.name == chosenPlayer.name) it.copy(isEliminated = true) else it
+                    }
+                    val newlyEliminatedPlayer = updatedPlayers.first { it.name == chosenPlayer.name }
+                    gameState = GameState.PlayerEliminated(updatedPlayers, newlyEliminatedPlayer, false) // Not first elim
+                }
+            )
+        }
+        is GameState.BoomerangEffect -> {
+            BoomerangEffectScreen(state.boomerangPlayer) {
+                val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
+                gameState = GameState.Speaking(state.players, speakingOrder)
+            }
+        }
         is GameState.MrWhiteGuess -> {
             MrWhiteGuessScreen(
                 player = state.mrWhite,
                 civilianWord = state.players.first { it.role == Role.CIVILIAN }.word!!,
                 onGuess = { isCorrect ->
-                    if (isCorrect) {
-                        gameState = GameState.RoundOver(Winner.MR_WHITE_WINS, state.players)
-                    } else {
-                        gameState = GameState.MrWhiteFailed(state.players)
-                    }
+                    val winner = if (isCorrect) Winner.MR_WHITE_WINS else Game.checkWinner(state.players)
+                    gameState = GameState.RoundOver(winner, state.players, null)
                 }
             )
         }
@@ -170,7 +201,7 @@ fun UndercoverApp() {
                 onContinue = {
                     val winner = Game.checkWinner(state.players)
                     if (winner != Winner.NONE) {
-                        gameState = GameState.RoundOver(winner, state.players)
+                        gameState = GameState.RoundOver(winner, state.players, null)
                     } else {
                         val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
                         gameState = GameState.Speaking(state.players, speakingOrder)
@@ -183,6 +214,11 @@ fun UndercoverApp() {
                 winner = state.winner,
                 onShowScores = {
                     val newScores = playerScores.toMutableMap()
+                    if (state.firstEliminatedPlayer?.power == Power.FOU_DE_JOIE) {
+                        val jesterName = state.firstEliminatedPlayer.name
+                        newScores[jesterName] = (newScores[jesterName] ?: 0) + 4
+                    }
+
                     when (state.winner) {
                         Winner.CIVILIANS_WIN -> state.originalPlayers.filter { it.role == Role.CIVILIAN }.forEach { p -> newScores[p.name] = (newScores[p.name] ?: 0) + 2 }
                         Winner.UNDERCOVERS_WIN -> state.originalPlayers.filter { it.role != Role.CIVILIAN }.forEach { p -> newScores[p.name] = (newScores[p.name] ?: 0) + 10 }
@@ -200,7 +236,7 @@ fun UndercoverApp() {
                 onContinue = {
                     gameSettings?.let {
                         val playerNames = playerScores.keys.toList()
-                        val newRoundPlayers = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount)
+                        val newRoundPlayers = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers)
                         gameState = GameState.Reveal(newRoundPlayers)
                     }
                 },
@@ -254,12 +290,6 @@ fun RulesDialog(onDismiss: () -> Unit) {
                     Text("1. Chacun découvre son mot (ou son rôle pour M. White).")
                     Text("2. À tour de rôle, chaque joueur donne un mot pour décrire le sien.")
                     Text("3. Après la discussion, le groupe vote pour éliminer un joueur.")
-                    Spacer(Modifier.height(16.dp))
-                    Text("Conditions de Victoire", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("\t• Les Civils gagnent s'ils éliminent tous les Infiltrés et M. White.")
-                    Text("\t• Les Infiltrés et M. White gagnent s'il ne reste qu'un seul Civil en jeu.")
-                    Text("\t• M. White gagne seul s'il est éliminé mais devine le mot des Civils.")
-
                 }
             }
         },
@@ -269,11 +299,12 @@ fun RulesDialog(onDismiss: () -> Unit) {
 
 
 @Composable
-fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhiteCount: Int) -> Unit) {
+fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhiteCount: Int, selectedPowers: Set<Power>) -> Unit) {
     var playerCount by remember { mutableIntStateOf(5) }
     var undercoverCount by remember { mutableIntStateOf(1) }
     var mrWhiteCount by remember { mutableIntStateOf(0) }
     var showRules by remember { mutableStateOf(false) }
+    var selectedPowers by remember { mutableStateOf(emptySet<Power>()) }
 
     if (showRules) {
         RulesDialog { showRules = false }
@@ -288,7 +319,7 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
     val badRolesCount = undercoverCount + mrWhiteCount
     val isRuleRespected = badRolesCount in 1..maxBadRoles && playerCount >= 3
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("Undercover", style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
         Text("Configurez votre partie", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
@@ -310,22 +341,34 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
                 }, 0, maxBadRoles)
             }
         }
-
-        Spacer(Modifier.height(24.dp))
-
+        Spacer(Modifier.height(16.dp))
         val civiliansCount = playerCount - badRolesCount
         Text("Civils: $civiliansCount", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
         Spacer(Modifier.height(16.dp))
-
-        if (!isRuleRespected) {
-            Text("Règle non respectée: Le total Infiltrés + M. White ($badRolesCount) doit être entre 1 et $maxBadRoles.", color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-        } else {
-            Spacer(Modifier.height(36.dp))
+        Text("Pouvoirs optionnels", style = MaterialTheme.typography.titleMedium)
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(Power.values()) { power ->
+                val isEnabled = when (power) {
+                    Power.VENGEUSE -> playerCount >= 5
+                    else -> true
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable(enabled = isEnabled) { selectedPowers = if (selectedPowers.contains(power)) selectedPowers - power else selectedPowers + power }
+                ) {
+                    Checkbox(checked = selectedPowers.contains(power), onCheckedChange = { isChecked ->
+                        if (isChecked) selectedPowers += power else selectedPowers -= power
+                    }, enabled = isEnabled)
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text(power.displayName, fontWeight = FontWeight.Bold, color = if(isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        Text(power.description, style = MaterialTheme.typography.bodySmall, color = if(isEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = { onStartGame(playerCount, undercoverCount, mrWhiteCount) }, enabled = isRuleRespected, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { onStartGame(playerCount, undercoverCount, mrWhiteCount, selectedPowers) }, enabled = isRuleRespected, modifier = Modifier.fillMaxWidth()) {
             Text("Suivant", style = MaterialTheme.typography.titleMedium)
         }
     }
@@ -368,6 +411,13 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
         } else {
             ElevatedCard(modifier = Modifier.padding(16.dp)) {
                 Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (currentPlayer.power != null && currentPlayer.power != Power.DEESSE_JUSTICE) {
+                        Text("Votre pouvoir : ${currentPlayer.power.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(currentPlayer.power.description, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(24.dp))
+                    }
+
                     if (currentPlayer.role == Role.MR_WHITE) {
                         Text("Vous êtes M. White !", style = MaterialTheme.typography.headlineMedium)
                         Text("Votre but est de trouver le mot secret des civils.", textAlign = TextAlign.Center)
@@ -387,19 +437,28 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
 
 @Composable
 fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
+    val deesse = state.roundPlayers.find { it.power == Power.DEESSE_JUSTICE }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Tour de parole", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+        if (deesse != null) {
+            Text("La Déesse de la Justice est ${deesse.name}.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        }
         Text("Chaque joueur doit donner un mot pour décrire son mot secret. L'ordre de parole est le suivant :", textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         ElevatedCard(modifier = Modifier.weight(1f).fillMaxWidth()){
             LazyColumn(modifier = Modifier.padding(16.dp)) {
                 items(state.speakingOrder) { player ->
-                    Text(player.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(player.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 8.dp))
+                        if (player.power == Power.BOOMERANG && player.isPowerUsed) {
+                            Text(" 🪃", style = MaterialTheme.typography.titleLarge)
+                        }
+                    }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onProceedToVote, modifier = Modifier.fillMaxWidth()) { Text("Passer au vote") }
+        Button(onClick = onProceedToVote, modifier = Modifier.fillMaxWidth()) { Text("Passer à l'élimination") }
     }
 }
 
@@ -419,8 +478,8 @@ fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Qui est le plus suspect ?", style = MaterialTheme.typography.headlineMedium)
-        Text("Votez pour éliminer un joueur.", style = MaterialTheme.typography.bodyLarge)
+        Text("Élimination", style = MaterialTheme.typography.headlineMedium)
+        Text("Qui le groupe a-t-il décidé d'éliminer ?", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(activePlayers) { player ->
@@ -438,10 +497,49 @@ fun PlayerEliminatedScreen(eliminatedPlayer: Player, onContinue: () -> Unit) {
         Text("${eliminatedPlayer.name} a été éliminé(e).", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         Text("Son rôle était : ${eliminatedPlayer.role.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        eliminatedPlayer.power?.let {
+            Spacer(Modifier.height(16.dp))
+            Text("Son pouvoir était : ${it.displayName}", style = MaterialTheme.typography.titleMedium)
+        }
         Spacer(Modifier.height(32.dp))
         Button(onClick = onContinue) { Text("Continuer") }
     }
 }
+
+@Composable
+fun AvengerRevengeScreen(players: List<Player>, avenger: Player, onPlayerChosen: (Player) -> Unit) {
+    val potentialVictims = players.filter { !it.isEliminated && it.name != avenger.name }
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("Vengeance !", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+        Text("${avenger.name}, vous avez été éliminé(e), mais vous pouvez emporter quelqu'un avec vous.", textAlign = TextAlign.Center)
+        Spacer(Modifier.height(24.dp))
+        Text("Qui choisissez-vous ?", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(potentialVictims) { victim ->
+                Button(onClick = { onPlayerChosen(victim) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(victim.name, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BoomerangEffectScreen(boomerangPlayer: Player, onContinue: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("BOOMERANG !", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+        Text("${boomerangPlayer.name} utilise son pouvoir !", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+        Text("L'élimination est annulée pour cette fois. Une icône 🪃 apparaît à côté de son nom.", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(32.dp))
+        Button(onClick = onContinue) { Text("Continuer") }
+    }
+}
+
 
 @Composable
 fun MrWhiteGuessScreen(player: Player, civilianWord: String, onGuess: (Boolean) -> Unit) {
@@ -509,6 +607,6 @@ fun ScoreboardScreen(scores: Map<String, Int>, onContinue: () -> Unit, onQuit: (
 @Composable
 fun GameSetupScreenPreview() {
     UndercoverTheme {
-        GameSetupScreen(onStartGame = { _, _, _ -> })
+        GameSetupScreen(onStartGame = { _, _, _, _ -> })
     }
 }
