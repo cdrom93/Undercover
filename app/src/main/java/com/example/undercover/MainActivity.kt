@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.undercover.ui.theme.UndercoverTheme
@@ -359,7 +360,8 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
                     Checkbox(checked = selectedPowers.contains(power), onCheckedChange = { isChecked ->
                         if (isChecked) selectedPowers += power else selectedPowers -= power
                     }, enabled = isEnabled)
-                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                    Text(power.emoji, modifier = Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.titleLarge)
+                    Column {
                         Text(power.displayName, fontWeight = FontWeight.Bold, color = if(isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                         Text(power.description, style = MaterialTheme.typography.bodySmall, color = if(isEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
                     }
@@ -412,7 +414,7 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
             ElevatedCard(modifier = Modifier.padding(16.dp)) {
                 Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (currentPlayer.power != null && currentPlayer.power != Power.DEESSE_JUSTICE) {
-                        Text("Votre pouvoir : ${currentPlayer.power.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("${currentPlayer.power.emoji} ${currentPlayer.power.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
                         Text(currentPlayer.power.description, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(24.dp))
@@ -437,11 +439,12 @@ fun RevealScreen(state: GameState.Reveal, onCardTap: () -> Unit, onNextPlayer: (
 
 @Composable
 fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
-    val deesse = state.roundPlayers.find { it.power == Power.DEESSE_JUSTICE }
+    val deesse = state.roundPlayers.find { it.power == Power.DEESSE_JUSTICE && !it.isEliminated }
+    val eliminatedPlayers = state.roundPlayers.filter { it.isEliminated }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Tour de parole", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         if (deesse != null) {
-            Text("La Déesse de la Justice est ${deesse.name}.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Text("${deesse.power!!.emoji} La Déesse de la Justice est ${deesse.name}.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         }
         Text("Chaque joueur doit donner un mot pour décrire son mot secret. L'ordre de parole est le suivant :", textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
@@ -457,6 +460,16 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
                 }
             }
         }
+        if (eliminatedPlayers.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("Joueurs éliminés", style = MaterialTheme.typography.titleMedium)
+            eliminatedPlayers.forEach { player ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(player.name, textDecoration = TextDecoration.LineThrough, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Text(" - ${player.role.displayName} ${player.power?.emoji ?: ""}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+            }
+        }
         Spacer(Modifier.height(16.dp))
         Button(onClick = onProceedToVote, modifier = Modifier.fillMaxWidth()) { Text("Passer à l'élimination") }
     }
@@ -465,6 +478,7 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
 @Composable
 fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
     val activePlayers = players.filter { !it.isEliminated }
+    val eliminatedPlayers = players.filter { it.isEliminated }
     var playerToConfirm by remember { mutableStateOf<Player?>(null) }
 
     playerToConfirm?.let { player ->
@@ -481,10 +495,20 @@ fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
         Text("Élimination", style = MaterialTheme.typography.headlineMedium)
         Text("Qui le groupe a-t-il décidé d'éliminer ?", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(activePlayers) { player ->
                 Button(onClick = { playerToConfirm = player }, modifier = Modifier.fillMaxWidth()) {
                     Text(player.name, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+        if (eliminatedPlayers.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("Joueurs éliminés", style = MaterialTheme.typography.titleMedium)
+            eliminatedPlayers.forEach { player ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(player.name, textDecoration = TextDecoration.LineThrough, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Text(" - ${player.role.displayName} ${player.power?.emoji ?: ""}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
             }
         }
@@ -499,7 +523,7 @@ fun PlayerEliminatedScreen(eliminatedPlayer: Player, onContinue: () -> Unit) {
         Text("Son rôle était : ${eliminatedPlayer.role.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         eliminatedPlayer.power?.let {
             Spacer(Modifier.height(16.dp))
-            Text("Son pouvoir était : ${it.displayName}", style = MaterialTheme.typography.titleMedium)
+            Text("Son pouvoir était : ${it.emoji} ${it.displayName}", style = MaterialTheme.typography.titleMedium)
         }
         Spacer(Modifier.height(32.dp))
         Button(onClick = onContinue) { Text("Continuer") }

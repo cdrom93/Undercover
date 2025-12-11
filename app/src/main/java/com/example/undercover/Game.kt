@@ -19,12 +19,12 @@ enum class Role(val displayName: String) {
     MR_WHITE("M. White")
 }
 
-enum class Power(val displayName: String, val description: String) {
-    FOU_DE_JOIE("Le Fou de Joie", "Gagne 4 points supplémentaires s'il est éliminé en premier."),
-    BOOMERANG("Le Boomerang", "La première fois que le Boomerang reçoit la majorité des votes, au lieu d'être éliminé, les votes contre lui rebondissent sur ceux qui les ont exprimés !"),
-    DEESSE_JUSTICE("Déesse de la Justice", "En cas d'égalité des votes, elle décide qui est éliminé (même si elle a déjà été éliminée)."),
-    FANTOME("Le Fantôme", "Peut encore voter même après avoir été éliminé !"),
-    VENGEUSE("La Vengeuse", "Quand la Vengeuse est éliminée, elle peut éliminer quelqu'un avec elle (nécessite 5 joueurs ou plus).")
+enum class Power(val displayName: String, val description: String, val emoji: String) {
+    FOU_DE_JOIE("Le Fou de Joie", "Gagne 4 points supplémentaires s'il est éliminé en premier.", "🃏"),
+    BOOMERANG("Le Boomerang", "La première fois que le Boomerang reçoit la majorité des votes, au lieu d'être éliminé, les votes contre lui rebondissent sur ceux qui les ont exprimés !", "🪃"),
+    DEESSE_JUSTICE("Déesse de la Justice", "En cas d'égalité des votes, elle décide qui est éliminé (même si elle a déjà été éliminée).", "⚖️"),
+    FANTOME("Le Fantôme", "Peut encore voter même après avoir été éliminé !", "👻"),
+    VENGEUSE("La Vengeuse", "Quand la Vengeuse est éliminée, elle peut éliminer quelqu'un avec elle (nécessite 5 joueurs ou plus).", "🦸‍♀️")
 }
 
 enum class Winner {
