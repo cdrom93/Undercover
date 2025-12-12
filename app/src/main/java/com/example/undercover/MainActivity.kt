@@ -45,6 +45,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.undercover.ui.theme.UndercoverTheme
 import java.text.Normalizer
+import kotlin.random.Random
 
 // --- State Definition ---
 
@@ -63,7 +64,7 @@ sealed class GameState {
     data class Scoreboard(val scores: Map<String, Int>) : GameState()
 }
 
-data class GameSettings(val playerCount: Int, val undercoverCount: Int, val mrWhiteCount: Int, val selectedPowers: Set<Power>)
+data class GameSettings(val playerCount: Int, val undercoverCount: Int, val mrWhiteCount: Int, val selectedPowers: Set<Power>, val randomRoles: Boolean)
 
 // --- Main App Composable (Router) ---
 
@@ -89,8 +90,8 @@ fun UndercoverApp() {
 
     when (val state = gameState) {
         is GameState.Setup -> {
-            GameSetupScreen(onStartGame = { pCount, uCount, mWCount, sPowers ->
-                val settings = GameSettings(pCount, uCount, mWCount, sPowers)
+            GameSetupScreen(onStartGame = { pCount, uCount, mWCount, sPowers, isRandom ->
+                val settings = GameSettings(pCount, uCount, mWCount, sPowers, isRandom)
                 gameSettings = settings
                 gameState = GameState.NameEntry(settings)
             })
@@ -237,7 +238,23 @@ fun UndercoverApp() {
                 onContinue = {
                     gameSettings?.let {
                         val playerNames = playerScores.keys.toList()
-                        val newRoundPlayers = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers)
+                        var uCount = it.undercoverCount
+                        var mWCount = it.mrWhiteCount
+
+                        if (it.randomRoles) {
+                            val maxBad = it.playerCount / 2
+                            if (maxBad > 0) {
+                                val totalBad = (1..maxBad).random()
+                                val maxMrWhite = if (it.playerCount >= 5) totalBad else 0
+                                mWCount = (0..maxMrWhite).random()
+                                uCount = totalBad - mWCount
+                            } else {
+                                uCount = 0
+                                mWCount = 0
+                            }
+                        }
+
+                        val newRoundPlayers = Game.setupGame(context, playerNames, uCount, mWCount, it.selectedPowers)
                         gameState = GameState.Reveal(newRoundPlayers)
                     }
                 },
@@ -260,13 +277,17 @@ fun String.normalizeForComparison(): String {
 }
 
 @Composable
-fun NumberSelector(label: String, value: Int, onValueChange: (Int) -> Unit, minValue: Int, maxValue: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-        Text(text = label, style = MaterialTheme.typography.titleMedium)
+fun NumberSelector(label: String, value: Int, onValueChange: (Int) -> Unit, minValue: Int, maxValue: Int, enabled: Boolean = true) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(text = label, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue) { Icon(Icons.Filled.Remove, "Remove") }
-            Text(text = "$value", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
-            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue) { Icon(Icons.Filled.Add, "Add") }
+            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue && enabled) { Icon(Icons.Filled.Remove, "Remove") }
+            Text(text = "$value", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp), color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue && enabled) { Icon(Icons.Filled.Add, "Add") }
         }
     }
 }
@@ -300,12 +321,13 @@ fun RulesDialog(onDismiss: () -> Unit) {
 
 
 @Composable
-fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhiteCount: Int, selectedPowers: Set<Power>) -> Unit) {
+fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhiteCount: Int, selectedPowers: Set<Power>, randomRoles: Boolean) -> Unit) {
     var playerCount by remember { mutableIntStateOf(5) }
     var undercoverCount by remember { mutableIntStateOf(1) }
     var mrWhiteCount by remember { mutableIntStateOf(0) }
     var showRules by remember { mutableStateOf(false) }
     var selectedPowers by remember { mutableStateOf(emptySet<Power>()) }
+    var randomRoles by remember { mutableStateOf(false) }
 
     if (showRules) {
         RulesDialog { showRules = false }
@@ -330,16 +352,20 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 NumberSelector("Joueurs", playerCount, { playerCount = it }, 3, 20)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { randomRoles = !randomRoles }) {
+                    Checkbox(checked = randomRoles, onCheckedChange = { randomRoles = it })
+                    Text("Rôles Aléatoires", modifier = Modifier.padding(start = 8.dp))
+                }
                 NumberSelector("Infiltrés", undercoverCount, { newValue ->
                     val newUndercover = newValue.coerceIn(0, maxBadRoles)
                     if (newUndercover + mrWhiteCount > maxBadRoles) mrWhiteCount = maxBadRoles - newUndercover
                     undercoverCount = newUndercover
-                }, 0, maxBadRoles)
+                }, 0, maxBadRoles, enabled = !randomRoles)
                 NumberSelector("M. White", mrWhiteCount, { newValue ->
                     val newMrWhite = newValue.coerceIn(0, maxBadRoles)
                     if (newMrWhite + undercoverCount > maxBadRoles) undercoverCount = maxBadRoles - newMrWhite
                     mrWhiteCount = newMrWhite
-                }, 0, maxBadRoles)
+                }, 0, maxBadRoles, enabled = !randomRoles)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -355,7 +381,7 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable(enabled = isEnabled) { selectedPowers = if (selectedPowers.contains(power)) selectedPowers - power else selectedPowers + power }
+                    modifier = Modifier.clickable(enabled = isEnabled) { if(isEnabled) selectedPowers = if (selectedPowers.contains(power)) selectedPowers - power else selectedPowers + power }
                 ) {
                     Checkbox(checked = selectedPowers.contains(power), onCheckedChange = { isChecked ->
                         if (isChecked) selectedPowers += power else selectedPowers -= power
@@ -370,7 +396,7 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = { onStartGame(playerCount, undercoverCount, mrWhiteCount, selectedPowers) }, enabled = isRuleRespected, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { onStartGame(playerCount, undercoverCount, mrWhiteCount, selectedPowers, randomRoles) }, enabled = isRuleRespected, modifier = Modifier.fillMaxWidth()) {
             Text("Suivant", style = MaterialTheme.typography.titleMedium)
         }
     }
@@ -645,6 +671,6 @@ fun ScoreboardScreen(scores: Map<String, Int>, onContinue: () -> Unit, onQuit: (
 @Composable
 fun GameSetupScreenPreview() {
     UndercoverTheme {
-        GameSetupScreen(onStartGame = { _, _, _, _ -> })
+        GameSetupScreen(onStartGame = { _, _, _, _,_ -> })
     }
 }
