@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -414,7 +415,13 @@ fun NameEntryScreen(playerCount: Int, onNamesConfirmed: (List<String>) -> Unit) 
                     value = playerNames[index],
                     onValueChange = { playerNames[index] = it },
                     label = { Text("Nom du joueur ${index + 1}") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused && playerNames[index] == "Joueur ${index + 1}") {
+                                playerNames[index] = ""
+                            }
+                        },
                     singleLine = true
                 )
             }
@@ -476,6 +483,9 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
                         if (player.power == Power.BOOMERANG && player.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleLarge)
                         }
+                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleLarge)
+                        }
                     }
                 }
             }
@@ -522,6 +532,9 @@ fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
                         Text(player.name, style = MaterialTheme.typography.titleMedium)
                         if (player.power == Power.BOOMERANG && player.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
@@ -571,6 +584,9 @@ fun AvengerRevengeScreen(players: List<Player>, avenger: Player, onPlayerChosen:
                         Text(victim.name, style = MaterialTheme.typography.titleMedium)
                         if (victim.power == Power.BOOMERANG && victim.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleMedium)
+                        }
+                        if (victim.power == Power.DEESSE_JUSTICE && !victim.isEliminated) {
+                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
