@@ -86,13 +86,29 @@ fun UndercoverApp() {
     var gameState by remember { mutableStateOf<GameState>(GameState.Setup) }
     var playerScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var gameSettings by remember { mutableStateOf<GameSettings?>(null) }
+    var roundCount by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
+
+    // Helper to calculate speaking order: pick a random starter (not Mr White) and cycle the original order
+    fun calculateSpeakingOrder(players: List<Player>): List<Player> {
+        val activePlayers = players.filter { !it.isEliminated }
+        if (activePlayers.isEmpty()) return emptyList()
+        
+        val potentialStarters = activePlayers.filter { it.role != Role.MR_WHITE }
+        val starter = if (potentialStarters.isNotEmpty()) potentialStarters.random() else activePlayers.random()
+        
+        val starterIndexInOriginal = players.indexOf(starter)
+        val rotated = players.drop(starterIndexInOriginal) + players.take(starterIndexInOriginal)
+        
+        return rotated.filter { !it.isEliminated }
+    }
 
     when (val state = gameState) {
         is GameState.Setup -> {
             GameSetupScreen(onStartGame = { pCount, uCount, mWCount, sPowers, isRandom ->
                 val settings = GameSettings(pCount, uCount, mWCount, sPowers, isRandom)
                 gameSettings = settings
+                roundCount = 0
                 gameState = GameState.NameEntry(settings)
             })
         }
@@ -101,7 +117,7 @@ fun UndercoverApp() {
                 playerCount = state.settings.playerCount,
                 onNamesConfirmed = { playerNames ->
                     gameSettings?.let {
-                        val players = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers)
+                        val players = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers, it.randomRoles)
                         playerScores = playerNames.associate { name -> name to 0 }
                         gameState = GameState.Reveal(players)
                     }
@@ -114,8 +130,7 @@ fun UndercoverApp() {
                 onCardTap = { gameState = state.copy(isCardRevealed = true) },
                 onNextPlayer = {
                     if (state.currentPlayerIndex == state.roundPlayers.size - 1) {
-                        val speakingOrder = state.roundPlayers.shuffled().toMutableList()
-                        gameState = GameState.Speaking(state.roundPlayers, speakingOrder)
+                        gameState = GameState.Speaking(state.roundPlayers, calculateSpeakingOrder(state.roundPlayers))
                     } else {
                         gameState = state.copy(currentPlayerIndex = state.currentPlayerIndex + 1, isCardRevealed = false)
                     }
@@ -152,7 +167,7 @@ fun UndercoverApp() {
             PlayerEliminatedScreen(
                 eliminatedPlayer = state.eliminatedPlayer,
                 onContinue = {
-                    if (state.eliminatedPlayer.power == Power.VENGEUSE && state.players.size >= 5) {
+                    if (state.eliminatedPlayer.power == Power.VENGEUSE && state.players.filter { !it.isEliminated }.isNotEmpty()) {
                         gameState = GameState.AvengerRevenge(state.players, state.eliminatedPlayer)
                     } else if (state.eliminatedPlayer.role == Role.MR_WHITE) {
                         gameState = GameState.MrWhiteGuess(state.players, state.eliminatedPlayer)
@@ -162,8 +177,7 @@ fun UndercoverApp() {
                             val firstEliminated = if (state.isFirstElimination) state.eliminatedPlayer else null
                             gameState = GameState.RoundOver(winner, state.players, firstEliminated)
                         } else {
-                            val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
-                            gameState = GameState.Speaking(state.players, speakingOrder)
+                            gameState = GameState.Speaking(state.players, calculateSpeakingOrder(state.players))
                         }
                     }
                 }
@@ -178,14 +192,13 @@ fun UndercoverApp() {
                         if (it.name == chosenPlayer.name) it.copy(isEliminated = true) else it
                     }
                     val newlyEliminatedPlayer = updatedPlayers.first { it.name == chosenPlayer.name }
-                    gameState = GameState.PlayerEliminated(updatedPlayers, newlyEliminatedPlayer, false) // Not first elim
+                    gameState = GameState.PlayerEliminated(updatedPlayers, newlyEliminatedPlayer, false)
                 }
             )
         }
         is GameState.BoomerangEffect -> {
             BoomerangEffectScreen(state.boomerangPlayer) {
-                val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
-                gameState = GameState.Speaking(state.players, speakingOrder)
+                gameState = GameState.Speaking(state.players, calculateSpeakingOrder(state.players))
             }
         }
         is GameState.MrWhiteGuess -> {
@@ -193,21 +206,24 @@ fun UndercoverApp() {
                 player = state.mrWhite,
                 civilianWord = state.players.first { it.role == Role.CIVILIAN }.word!!,
                 onGuess = { isCorrect ->
-                    val winner = if (isCorrect) Winner.MR_WHITE_WINS else Game.checkWinner(state.players)
-                    gameState = GameState.RoundOver(winner, state.players, null)
+                    if (isCorrect) {
+                        gameState = GameState.RoundOver(Winner.MR_WHITE_WINS, state.players, null)
+                    } else {
+                        // After failing, check if the game is over or should continue
+                        val winner = Game.checkWinner(state.players)
+                        if (winner != Winner.NONE) {
+                            gameState = GameState.RoundOver(winner, state.players, null)
+                        } else {
+                            gameState = GameState.MrWhiteFailed(state.players)
+                        }
+                    }
                 }
             )
         }
         is GameState.MrWhiteFailed -> {
             MrWhiteFailedScreen(
                 onContinue = {
-                    val winner = Game.checkWinner(state.players)
-                    if (winner != Winner.NONE) {
-                        gameState = GameState.RoundOver(winner, state.players, null)
-                    } else {
-                        val speakingOrder = state.players.filter { !it.isEliminated }.shuffled()
-                        gameState = GameState.Speaking(state.players, speakingOrder)
-                    }
+                    gameState = GameState.Speaking(state.players, calculateSpeakingOrder(state.players))
                 }
             )
         }
@@ -237,30 +253,16 @@ fun UndercoverApp() {
                 scores = state.scores,
                 onContinue = {
                     gameSettings?.let {
+                        roundCount++
                         val playerNames = playerScores.keys.toList()
-                        var uCount = it.undercoverCount
-                        var mWCount = it.mrWhiteCount
-
-                        if (it.randomRoles) {
-                            val maxBad = it.playerCount / 2
-                            if (maxBad > 0) {
-                                val totalBad = (1..maxBad).random()
-                                val maxMrWhite = if (it.playerCount >= 5) totalBad else 0
-                                mWCount = (0..maxMrWhite).random()
-                                uCount = totalBad - mWCount
-                            } else {
-                                uCount = 0
-                                mWCount = 0
-                            }
-                        }
-
-                        val newRoundPlayers = Game.setupGame(context, playerNames, uCount, mWCount, it.selectedPowers)
+                        val newRoundPlayers = Game.setupGame(context, playerNames, it.undercoverCount, it.mrWhiteCount, it.selectedPowers, it.randomRoles)
                         gameState = GameState.Reveal(newRoundPlayers)
                     }
                 },
                 onQuit = {
                     gameState = GameState.Setup
                     playerScores = emptyMap()
+                    roundCount = 0
                 }
             )
         }
@@ -277,17 +279,13 @@ fun String.normalizeForComparison(): String {
 }
 
 @Composable
-fun NumberSelector(label: String, value: Int, onValueChange: (Int) -> Unit, minValue: Int, maxValue: Int, enabled: Boolean = true) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(text = label, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+fun NumberSelector(label: String, value: Int, onValueChange: (Int) -> Unit, minValue: Int, maxValue: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+        Text(text = label, style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue && enabled) { Icon(Icons.Filled.Remove, "Remove") }
-            Text(text = "$value", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp), color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
-            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue && enabled) { Icon(Icons.Filled.Add, "Add") }
+            IconButton(onClick = { onValueChange(value - 1) }, enabled = value > minValue) { Icon(Icons.Filled.Remove, "Remove") }
+            Text(text = "$value", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
+            IconButton(onClick = { onValueChange(value + 1) }, enabled = value < maxValue) { Icon(Icons.Filled.Add, "Add") }
         }
     }
 }
@@ -360,12 +358,12 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
                     val newUndercover = newValue.coerceIn(0, maxBadRoles)
                     if (newUndercover + mrWhiteCount > maxBadRoles) mrWhiteCount = maxBadRoles - newUndercover
                     undercoverCount = newUndercover
-                }, 0, maxBadRoles, enabled = !randomRoles)
+                }, 0, maxBadRoles)
                 NumberSelector("M. White", mrWhiteCount, { newValue ->
                     val newMrWhite = newValue.coerceIn(0, maxBadRoles)
                     if (newMrWhite + undercoverCount > maxBadRoles) undercoverCount = maxBadRoles - newMrWhite
                     mrWhiteCount = newMrWhite
-                }, 0, maxBadRoles, enabled = !randomRoles)
+                }, 0, maxBadRoles)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -381,7 +379,7 @@ fun GameSetupScreen(onStartGame: (playerCount: Int, undercoverCount: Int, mrWhit
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable(enabled = isEnabled) { if(isEnabled) selectedPowers = if (selectedPowers.contains(power)) selectedPowers - power else selectedPowers + power }
+                    modifier = Modifier.clickable(enabled = isEnabled) { selectedPowers = if (selectedPowers.contains(power)) selectedPowers - power else selectedPowers + power }
                 ) {
                     Checkbox(checked = selectedPowers.contains(power), onCheckedChange = { isChecked ->
                         if (isChecked) selectedPowers += power else selectedPowers -= power
@@ -478,9 +476,6 @@ fun SpeakingScreen(state: GameState.Speaking, onProceedToVote: () -> Unit) {
                         if (player.power == Power.BOOMERANG && player.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleLarge)
                         }
-                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
-                            Text(" ⚖️", style = MaterialTheme.typography.titleLarge)
-                        }
                     }
                 }
             }
@@ -527,9 +522,6 @@ fun VotingScreen(players: List<Player>, onPlayerVoted: (Player) -> Unit) {
                         Text(player.name, style = MaterialTheme.typography.titleMedium)
                         if (player.power == Power.BOOMERANG && player.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleMedium)
-                        }
-                        if (player.power == Power.DEESSE_JUSTICE && !player.isEliminated) {
-                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
@@ -579,9 +571,6 @@ fun AvengerRevengeScreen(players: List<Player>, avenger: Player, onPlayerChosen:
                         Text(victim.name, style = MaterialTheme.typography.titleMedium)
                         if (victim.power == Power.BOOMERANG && victim.isPowerUsed) {
                             Text(" 🪃", style = MaterialTheme.typography.titleMedium)
-                        }
-                        if (victim.power == Power.DEESSE_JUSTICE && !victim.isEliminated) {
-                            Text(" ⚖️", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
@@ -671,6 +660,6 @@ fun ScoreboardScreen(scores: Map<String, Int>, onContinue: () -> Unit, onQuit: (
 @Composable
 fun GameSetupScreenPreview() {
     UndercoverTheme {
-        GameSetupScreen(onStartGame = { _, _, _, _,_ -> })
+        GameSetupScreen(onStartGame = { _, _, _, _, _ -> })
     }
 }

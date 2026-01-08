@@ -3,6 +3,7 @@ package com.example.undercover
 import android.content.Context
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.random.Random
 
 data class Player(
     val name: String,
@@ -10,7 +11,7 @@ data class Player(
     val word: String?,
     val power: Power? = null,
     val isEliminated: Boolean = false,
-    val isPowerUsed: Boolean = false // For powers like Boomerang
+    val isPowerUsed: Boolean = false
 )
 
 enum class Role(val displayName: String) {
@@ -21,8 +22,8 @@ enum class Role(val displayName: String) {
 
 enum class Power(val displayName: String, val description: String, val emoji: String) {
     FOU_DE_JOIE("Le Fou de Joie", "Gagne 4 points supplémentaires s'il est éliminé en premier.", "🃏"),
-    BOOMERANG("Le Boomerang", "La première fois que le Boomerang reçoit la majorité des votes, au lieu d'être éliminé, les votes contre lui rebondissent sur ceux qui les ont exprimés !", "🪃"),
-    DEESSE_JUSTICE("Déesse de la Justice", "En cas d'égalité des votes, elle décide qui est éliminé (même si elle a déjà été éliminée).", "⚖️"),
+    BOOMERANG("Le Boomerang", "La première fois que le Boomerang reçoit la majorité des votes, au lieu d'être éliminé, son pouvoir le protège !", "🪃"),
+    DEESSE_JUSTICE("Déesse de la Justice", "En cas d'égalité des votes, elle décide qui est éliminé.", "⚖️"),
     FANTOME("Le Fantôme", "Peut encore voter même après avoir été éliminé !", "👻"),
     VENGEUSE("La Vengeuse", "Quand la Vengeuse est éliminée, elle peut éliminer quelqu'un avec elle.", "🦸‍♀️")
 }
@@ -38,10 +39,12 @@ data class WordPair(val word1: String, val word2: String)
 
 object Game {
     private var wordPairs: List<WordPair> = emptyList()
+    private const val HISTORY_PREFS = "undercover_history"
+    private const val HISTORY_KEY = "played_words"
+    private const val MAX_HISTORY = 100
 
     private fun loadWords(context: Context) {
         if (wordPairs.isNotEmpty()) return
-
         val newWordPairs = mutableListOf<WordPair>()
         try {
             val inputStream = context.assets.open("word_pairs.csv")
@@ -58,16 +61,61 @@ object Game {
         }
     }
 
-    fun setupGame(context: Context, playerNames: List<String>, undercoverCount: Int, mrWhiteCount: Int, selectedPowers: Set<Power>): List<Player> {
+    private fun getHistory(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(HISTORY_PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(HISTORY_KEY, "")?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
+    }
+
+    private fun saveToHistory(context: Context, word1: String, word2: String) {
+        val history = getHistory(context).toMutableList()
+        history.add(0, word1)
+        history.add(0, word2)
+        val limitedHistory = history.distinct().take(MAX_HISTORY * 2)
+        val prefs = context.getSharedPreferences(HISTORY_PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString(HISTORY_KEY, limitedHistory.joinToString(";")).apply()
+    }
+
+    fun setupGame(
+        context: Context,
+        playerNames: List<String>,
+        undercoverCount: Int,
+        mrWhiteCount: Int,
+        selectedPowers: Set<Power>,
+        randomRoles: Boolean
+    ): List<Player> {
         loadWords(context)
+        val history = getHistory(context)
+
+        val availablePairs = wordPairs.filter { pair ->
+            pair.word1 !in history && pair.word2 !in history
+        }.ifEmpty { wordPairs }
+
+        val selectedWordPair = availablePairs.random()
+        saveToHistory(context, selectedWordPair.word1, selectedWordPair.word2)
 
         val playerCount = playerNames.size
+        var finalUndercoverCount = undercoverCount
+        var finalMrWhiteCount = mrWhiteCount
+
+        if (randomRoles) {
+            val maxBad = playerCount / 2
+            if (maxBad > 0) {
+                val totalBad = (1..maxBad).random()
+                val maxMrWhite = if (playerCount >= 5) totalBad else 0
+                finalMrWhiteCount = (0..maxMrWhite).random()
+                finalUndercoverCount = totalBad - finalMrWhiteCount
+            } else {
+                finalUndercoverCount = 0
+                finalMrWhiteCount = 0
+            }
+        }
+
         val roles = mutableListOf<Role>()
-        val civilianCount = playerCount - undercoverCount - mrWhiteCount
+        val civilianCount = playerCount - finalUndercoverCount - finalMrWhiteCount
 
         repeat(civilianCount) { roles.add(Role.CIVILIAN) }
-        repeat(undercoverCount) { roles.add(Role.UNDERCOVER) }
-        repeat(mrWhiteCount) { roles.add(Role.MR_WHITE) }
+        repeat(finalUndercoverCount) { roles.add(Role.UNDERCOVER) }
+        repeat(finalMrWhiteCount) { roles.add(Role.MR_WHITE) }
         roles.shuffle()
 
         val powersToAssign = selectedPowers.shuffled().toMutableList()
@@ -78,8 +126,7 @@ object Game {
             playerPowers[playerIndices.removeAt(0)] = powersToAssign.removeAt(0)
         }
 
-        val selectedWordPair = wordPairs.random()
-        val (civilianWord, undercoverWord) = if (Math.random() > 0.5) selectedWordPair.word1 to selectedWordPair.word2 else selectedWordPair.word2 to selectedWordPair.word1
+        val (civilianWord, undercoverWord) = if (Random.nextBoolean()) selectedWordPair.word1 to selectedWordPair.word2 else selectedWordPair.word2 to selectedWordPair.word1
 
         return playerNames.mapIndexed { index, name ->
             Player(
